@@ -1,0 +1,47 @@
+Step 1 : Create a table named Province_Pair to check which provinces are paired together.
+----------------------------------------------------------------------------------------------
+
+CREATE TABLE 'Province_Pair' AS 
+
+WITH Trip_Provinces AS (
+    SELECT 
+        'TRIP-' || ROW_NUMBER() OVER (ORDER BY user_id, MIN(date)) AS Trip_ID,
+        user_id,
+        RunningTotal,
+        MIN(date) AS 'Start Date',
+        MAX(date) AS 'End Date',
+        GROUP_CONCAT(DISTINCT Location ORDER BY Location ASC) AS 'Province_List'
+    FROM Master_Unpivot
+    WHERE Location != hometown
+    GROUP BY RunningTotal, user_id
+    ORDER BY user_id, MIN(date)
+)
+--,Province_Pairs AS (
+    SELECT 
+        Trip_Provinces.Trip_ID,
+        Master_Unpivot.user_id,
+        LAG(Master_Unpivot.Location, 1) OVER (PARTITION BY Master_Unpivot.user_id, Master_Unpivot.RunningTotal ORDER BY Master_Unpivot.date, Master_Unpivot.hour) AS Province_From,
+        Master_Unpivot.Location AS Province_To
+    FROM Master_Unpivot
+    JOIN Trip_Provinces ON Master_Unpivot.user_id = Trip_Provinces.user_id 
+                        AND Master_Unpivot.RunningTotal = Trip_Provinces.RunningTotal
+    WHERE Master_Unpivot.Location != Master_Unpivot.hometown
+
+
+Step 2 : Display the results of paired provinces and their counts.
+----------------------------------------------------------------------------------------------
+
+SELECT MT.province_pair,COUNT(*)
+FROM
+(
+SELECT *,
+       CASE 
+           WHEN province_from < province_to THEN province_from || '-' || province_to
+           ELSE province_to || '-' || province_from
+       END AS province_pair
+FROM Province_Pair
+WHERE province_from != province_to
+) MT
+GROUP BY MT.province_pair
+ORDER BY COUNT(*) DESC
+
