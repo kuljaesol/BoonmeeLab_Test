@@ -1,0 +1,15 @@
+SELECT 
+    'TRIP-' || ROW_NUMBER() OVER (ORDER BY user_id, MIN(date)) AS 'Trip_ID',
+    'TRIP-' || RunningTotal AS 'Trip_Count',
+    user_id,
+    MIN(date) AS 'Start Date',
+    MAX(date) AS 'End Date',
+    COUNT(DISTINCT Location) AS 'Province_list',
+    GROUP_concat(DISTINCT Location) AS 'Province_list'
+FROM (
+    SELECT * 
+    FROM Master_Unpivot
+) AS Subquery
+WHERE Location != hometown
+GROUP BY RunningTotal, user_id
+ORDER BY COUNT(DISTINCT Location) desc,user_id, MIN(date);
