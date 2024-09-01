@@ -1,0 +1,95 @@
+Step 1: Prepare and define various conditions, organizing them into a table named 'Master'
+-------------------------------------------------------------------------------------------------------------
+
+CREATE TABLE 'Master' AS 
+
+SELECT *,
+       (CASE
+            WHEN (MT.hometown = MT.province) AND (MT.hometown = MT.Check_next_Location) THEN 'SamePlace'
+            WHEN Seq = 1 THEN 'Start'
+            WHEN (MT.hometown = MT.province) AND (MT.hometown != MT.Check_next_Location) THEN 'Start'
+            WHEN (MT.hometown != MT.province) AND (MT.hometown = MT.Check_next_Location) THEN 'End'
+            WHEN (MT.hometown != MT.province) AND (MT.hometown != MT.Check_next_Location) AND (MT.diff_day >= 5) THEN 'Start'
+        END) AS "Condition"
+FROM (
+    SELECT date,
+           hour,
+           user_id,
+           province,
+           hometown,
+           LEAD(date, 1) OVER (PARTITION BY user_id ORDER BY date, hour) AS "Check_next_Date",
+           LEAD(hour, 1) OVER (PARTITION BY user_id ORDER BY date, hour) AS "Check_next_hour",
+           LEAD(province, 1) OVER (PARTITION BY user_id ORDER BY date, hour) AS "Check_next_Location",
+           ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY date ASC, hour ASC) AS "Seq",
+           (julianday(date) - julianday(LAG(date, 1) OVER (PARTITION BY user_id ORDER BY date, hour))) AS "diff_day"
+    FROM (
+        SELECT *,
+               ROW_NUMBER() OVER (PARTITION BY U.user_id, T.date, T.hour ORDER BY U.user_id ASC, T.date ASC, T.hour ASC) AS "Check_Dup"
+        FROM "TRANSACTION" T
+        JOIN "USER" U ON T.user_id = U.user_id
+    )
+    WHERE Check_Dup = 1
+) MT
+
+
+
+Step 2: Combine columns to compare which provinces are not the user's hometown, then create a table named 'Master_Unpivot'
+---------------------------------------------------------------------------------------------------------------------------
+
+CREATE TABLE Master_Unpivot AS 
+
+WITH Master_CTE AS (
+    SELECT *,
+           COUNT(CASE WHEN Condition = 'Start' THEN 1 ELSE NULL END) OVER (
+               PARTITION BY user_id 
+               ORDER BY user_id, date, hour 
+               ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+           ) AS RunningTotal
+    FROM MASTER
+    WHERE (Condition IS NULL OR Condition != 'SamePlace') 
+      AND check_next_location IS NOT NULL
+)
+-- Unpivoting the columns
+SELECT 
+    user_id,
+    date,
+    hour,
+    Condition,
+    RunningTotal,
+    'Province' AS Location_Type,
+    province AS Location,
+    hometown
+FROM Master_CTE
+
+UNION ALL
+
+SELECT 
+    user_id,
+    date,
+    hour,
+    Condition,
+    RunningTotal,
+    'NextLocation' AS Location_Type,
+    check_next_location AS Location,
+    hometown
+FROM Master_CTE
+
+ORDER BY user_id, date, hour, Location_Type;
+
+
+Step 3: Query for Output
+-------------------------------------------------------------------------------------------------------------
+
+SELECT 
+    'TRIP-' || ROW_NUMBER() OVER (ORDER BY user_id, MIN(date)) AS 'Trip_ID',
+    user_id,
+    MIN(date) AS 'Start Date',
+    MAX(date) AS 'End Date',
+    GROUP_CONCAT(DISTINCT Location) AS 'Province_list'
+FROM (
+    SELECT * 
+    FROM Master_Unpivot
+) AS Subquery
+WHERE Location != hometown
+GROUP BY RunningTotal, user_id
+ORDER BY user_id, MIN(date);
